@@ -18,6 +18,7 @@
   "files": [
     "Color.js",
     "Color.d.ts",
+    "llms.txt",
     "README.md"
   ],
   "scripts": {
