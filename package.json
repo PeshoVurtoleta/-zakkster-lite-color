@@ -1,0 +1,61 @@
+{
+  "name": "@zakkster/lite-color",
+  "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
+  "version": "1.0.7",
+  "description": "OKLCH color interpolation, multi-stop gradients, and CSS formatting for games and animations.",
+  "type": "module",
+  "main": "./Color.js",
+  "module": "./Color.js",
+  "types": "./Color.d.ts",
+  "exports": {
+    ".": {
+      "types": "./Color.d.ts",
+      "node": "./Color.js",
+      "import": "./Color.js",
+      "default": "./Color.js"
+    }
+  },
+  "files": [
+    "Color.js",
+    "Color.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/PeshoVurtoleta/lite-color#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeshoVurtoleta/lite-color.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PeshoVurtoleta/lite-color/issues",
+    "email": "shinikchiev@yahoo.com"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/PeshoVurtoleta"
+  },
+  "peerDependencies": {
+    "@zakkster/lite-lerp": "^1.0.5"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "oklch",
+    "color",
+    "interpolation",
+    "gradient",
+    "lerp",
+    "game",
+    "css",
+    "hsl"
+  ],
+  "sideEffects": false
+}
