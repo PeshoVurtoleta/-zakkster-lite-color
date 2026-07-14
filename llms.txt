@@ -19,6 +19,10 @@ npm install @zakkster/lite-color
 - `createGradient(colors, ease?): (t) => OklchColor` — Create a reusable gradient sampler function. Call the returned function with t (0–1).
 - `reverseGradient(colors): OklchColor[]` — Reverse a color array without mutating the original.
 - `randomFromGradient(colors, rng): OklchColor` — Pick a random color from anywhere along the gradient using a seeded RNG.
+- `bakeGradient(colors, steps, out?, ease?): Float32Array` — Bake a gradient into a packed LUT of pre-evaluated OKLCH stops (3 floats per stop: l, c, h). Setup-time. Pass `out` to re-bake with zero allocations.
+- `bakeCssGradient(colors, steps, ease?): string[]` — Bake a gradient into pre-formatted CSS `oklch()` strings. Format once at setup, index per frame — never call `toCssOklch()` in a render loop.
+- `toRgbTo(color, out, offset?)` — Zero-GC OKLCH → normalized sRGB RGBA (0–1) written into a caller-owned buffer. Bridge to WebGL / lite-gl RGBA fields.
+- `toRgbBytesTo(color, out, offset?)` — Zero-GC OKLCH → sRGB bytes (0–255) written into a caller-owned buffer. Bridge to canvas ImageData.
 
 ## OklchColor Type
 `{ l: number, c: number, h: number, a?: number }` where l=lightness (0–1), c=chroma (0–0.4), h=hue (0–360), a=alpha (0–1).
@@ -39,6 +43,13 @@ const color = heatmap(temperature / maxTemp);
 - User is working with OKLCH colors in CSS or canvas
 - User needs multi-stop color gradients for heatmaps, themes, or VFX
 - User wants to interpolate hue via shortest path (no 360° jumps)
+- User needs a pre-baked color LUT for particles, confetti, or high-object-count VFX
+- User needs OKLCH → RGB output for WebGL buffers or canvas ImageData with no per-frame allocations
+
+## Ecosystem Positioning
+`lite-color` is the <1KB hot-path interpolation core (per-import, tree-shaken; the full surface is 1.37 KB gzipped): OKLCH lerp, multi-stop gradients, CSS round-tripping, `*To` zero-GC variants, LUT baking, and RGB bridges.
+Palette science, harmony generation, and color theory live in `@zakkster/lite-hueforge`.
+Design systems, tokens, variants, and theme engines live in `@zakkster/lite-color-engine`.
 
 ## Part of the @zakkster ecosystem
 Zero-GC, deterministic, tree-shakeable micro-libraries for high-performance web presentation.

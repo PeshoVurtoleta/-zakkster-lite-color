@@ -19,7 +19,11 @@ import {
     multiStopGradientTo,
     createGradient,
     reverseGradient,
-    randomFromGradient
+    randomFromGradient,
+    bakeGradient,
+    bakeCssGradient,
+    toRgbTo,
+    toRgbBytesTo
 } from './Color.js';
 
 const red   = { l: 0.6, c: 0.25, h: 30 };
@@ -318,4 +322,216 @@ describe('🎨 lite-color', () => {
             expect(result.l).toBeCloseTo(red.l);
         });
     });
+
+    // === v1.1.0 — LUT baking + RGB bridges ===
+
+    describe('toRgbTo()', () => {
+        it('converts OKLCH white to normalized sRGB white', () => {
+            const out = new Float32Array(4);
+            toRgbTo({ l: 1, c: 0, h: 0 }, out);
+            expect(out[0]).toBeCloseTo(1, 4);
+            expect(out[1]).toBeCloseTo(1, 4);
+            expect(out[2]).toBeCloseTo(1, 4);
+            expect(out[3]).toBe(1);
+        });
+
+        it('round-trips the sRGB red primary', () => {
+            const out = new Float32Array(4);
+            toRgbTo({ l: 0.62796, c: 0.25768, h: 29.234 }, out);
+            expect(out[0]).toBeCloseTo(1, 2);
+            expect(out[1]).toBeCloseTo(0, 2);
+            expect(out[2]).toBeCloseTo(0, 2);
+        });
+
+        it('writes at an offset without touching neighbours', () => {
+            const out = new Float32Array(12).fill(-1);
+            toRgbTo({ l: 0, c: 0, h: 0 }, out, 4);
+            expect(out[3]).toBe(-1);
+            expect(out[4]).toBe(0);
+            expect(out[7]).toBe(1);
+            expect(out[8]).toBe(-1);
+        });
+
+        it('clips out-of-gamut colors into [0,1] instead of emitting NaN', () => {
+            const out = new Float32Array(4);
+            toRgbTo({ l: 0.7, c: 0.35, h: 145 }, out);
+            for (let i = 0; i < 4; i++) {
+                expect(Number.isNaN(out[i])).toBe(false);
+                expect(out[i]).toBeGreaterThanOrEqual(0);
+                expect(out[i]).toBeLessThanOrEqual(1);
+            }
+        });
+
+        it('reads alpha and clamps it', () => {
+            const out = new Float32Array(4);
+            toRgbTo({ l: 0.5, c: 0.1, h: 30, a: 0.25 }, out);
+            expect(out[3]).toBeCloseTo(0.25);
+            toRgbTo({ l: 0.5, c: 0.1, h: 30, a: 5 }, out);
+            expect(out[3]).toBe(1);
+        });
+
+        it('returns the same out reference (zero-GC)', () => {
+            const out = new Float32Array(4);
+            expect(toRgbTo({ l: 0.5, c: 0.1, h: 30 }, out)).toBe(out);
+        });
+    });
+
+    describe('toRgbBytesTo()', () => {
+        it('converts OKLCH white to 255,255,255,255', () => {
+            const out = new Uint8ClampedArray(4);
+            toRgbBytesTo({ l: 1, c: 0, h: 0 }, out);
+            expect(Array.from(out)).toEqual([255, 255, 255, 255]);
+        });
+
+        it('converts OKLCH black to 0,0,0,255', () => {
+            const out = new Uint8ClampedArray(4);
+            toRgbBytesTo({ l: 0, c: 0, h: 0 }, out);
+            expect(Array.from(out)).toEqual([0, 0, 0, 255]);
+        });
+
+        it('writes ImageData-style at a pixel offset', () => {
+            const data = new Uint8ClampedArray(16);
+            toRgbBytesTo({ l: 1, c: 0, h: 0 }, data, 2 * 4);
+            expect(data[7]).toBe(0);
+            expect(Array.from(data.slice(8, 12))).toEqual([255, 255, 255, 255]);
+        });
+
+        it('encodes alpha as a byte', () => {
+            const out = new Uint8Array(4);
+            toRgbBytesTo({ l: 0.5, c: 0, h: 0, a: 0.5 }, out);
+            expect(out[3]).toBe(128);
+        });
+
+        it('never writes NaN for out-of-gamut colors', () => {
+            const out = new Uint8Array(4);
+            toRgbBytesTo({ l: 0.7, c: 0.4, h: 145 }, out);
+            for (let i = 0; i < 4; i++) expect(Number.isNaN(out[i])).toBe(false);
+        });
+    });
+
+    describe('bakeGradient()', () => {
+        it('returns a Float32Array of steps * 3', () => {
+            const lut = bakeGradient([red, blue], 16);
+            expect(lut).toBeInstanceOf(Float32Array);
+            expect(lut.length).toBe(48);
+        });
+
+        it('pins the endpoints to the first and last stop', () => {
+            const lut = bakeGradient([red, blue], 32);
+            expect(lut[0]).toBeCloseTo(red.l, 5);
+            expect(lut[1]).toBeCloseTo(red.c, 5);
+            expect(lut[93]).toBeCloseTo(blue.l, 5);
+            expect(lut[94]).toBeCloseTo(blue.c, 5);
+        });
+
+        it('matches multiStopGradient at every step', () => {
+            const colors = [red, green, blue];
+            const steps = 17;
+            const lut = bakeGradient(colors, steps);
+            for (let i = 0; i < steps; i++) {
+                const expected = multiStopGradient(colors, i / (steps - 1));
+                expect(lut[i * 3]).toBeCloseTo(expected.l, 5);
+                expect(lut[i * 3 + 1]).toBeCloseTo(expected.c, 5);
+                expect(lut[i * 3 + 2]).toBeCloseTo(expected.h, 4);
+            }
+        });
+
+        it('applies the optional ease, matching createGradient', () => {
+            const ease = (x) => x * x;
+            const colors = [red, blue];
+            const lut = bakeGradient(colors, 8, undefined, ease);
+            const sampler = createGradient(colors, ease);
+            for (let i = 0; i < 8; i++) {
+                expect(lut[i * 3]).toBeCloseTo(sampler(i / 7).l, 5);
+            }
+        });
+
+        it('writes into a caller-owned out (zero-GC re-bake)', () => {
+            const out = new Float32Array(48);
+            const result = bakeGradient([red, blue], 16, out);
+            expect(result).toBe(out);
+            expect(out[0]).toBeCloseTo(red.l, 5);
+        });
+
+        it('accepts an oversized out buffer', () => {
+            const out = new Float32Array(96);
+            expect(() => bakeGradient([red, blue], 16, out)).not.toThrow();
+        });
+
+        it('throws when out is too small', () => {
+            expect(() => bakeGradient([red, blue], 16, new Float32Array(47)))
+                .toThrow(/length >= 48/);
+        });
+
+        it('handles a single color', () => {
+            const lut = bakeGradient([red], 4);
+            expect(lut.length).toBe(12);
+            for (let i = 0; i < 4; i++) expect(lut[i * 3]).toBeCloseTo(red.l, 5);
+        });
+
+        it('handles steps = 1 (t = 0)', () => {
+            const lut = bakeGradient([red, blue], 1);
+            expect(lut.length).toBe(3);
+            expect(lut[0]).toBeCloseTo(red.l, 5);
+        });
+
+        it('truncates fractional steps instead of corrupting the LUT', () => {
+            const lut = bakeGradient([red, blue], 8.9);
+            expect(lut.length).toBe(24);
+        });
+
+        it('throws on invalid steps', () => {
+            expect(() => bakeGradient([red, blue], 0)).toThrow(/steps/);
+            expect(() => bakeGradient([red, blue], -4)).toThrow(/steps/);
+            expect(() => bakeGradient([red, blue], NaN)).toThrow(/steps/);
+            expect(() => bakeGradient([red, blue], Infinity)).toThrow(/steps/);
+            expect(() => bakeGradient([red, blue], '16')).toThrow(/steps/);
+        });
+
+        it('throws on an empty color array', () => {
+            expect(() => bakeGradient([], 8)).toThrow(/at least 1 color/);
+        });
+
+        it('is allocation-free when reusing out', () => {
+            const out = new Float32Array(300);
+            const before = out.buffer;
+            for (let i = 0; i < 50; i++) bakeGradient([red, green, blue], 100, out);
+            expect(out.buffer).toBe(before);
+        });
+    });
+
+    describe('bakeCssGradient()', () => {
+        it('returns `steps` CSS strings', () => {
+            const css = bakeCssGradient([red, blue], 5);
+            expect(css).toHaveLength(5);
+            css.forEach((s) => expect(s).toMatch(/^oklch\(/));
+        });
+
+        it('matches toCssOklch(multiStopGradient(...)) at every step', () => {
+            const colors = [red, green, blue];
+            const steps = 9;
+            const css = bakeCssGradient(colors, steps);
+            for (let i = 0; i < steps; i++) {
+                const expected = toCssOklch(multiStopGradient(colors, i / (steps - 1)));
+                expect(css[i]).toBe(expected);
+            }
+        });
+
+        it('applies the optional ease', () => {
+            const ease = (x) => x * x;
+            const css = bakeCssGradient([red, blue], 4, ease);
+            expect(css[1]).toBe(toCssOklch(multiStopGradient([red, blue], 1 / 3, ease)));
+        });
+
+        it('handles a single color', () => {
+            const css = bakeCssGradient([red], 3);
+            expect(new Set(css).size).toBe(1);
+        });
+
+        it('throws on invalid steps and empty colors', () => {
+            expect(() => bakeCssGradient([red], 0)).toThrow(/steps/);
+            expect(() => bakeCssGradient([], 4)).toThrow(/at least 1 color/);
+        });
+    });
 });
+

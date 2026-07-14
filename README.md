@@ -1,13 +1,15 @@
 # @zakkster/lite-color
 
 [![npm version](https://img.shields.io/npm/v/@zakkster/lite-color.svg?style=for-the-badge&color=latest)](https://www.npmjs.com/package/@zakkster/lite-color)
+[![sponsor](https://img.shields.io/badge/sponsor-PeshoVurtoleta-ea4aaa.svg?logo=github)](https://github.com/sponsors/PeshoVurtoleta)
 [![npm bundle size](https://img.shields.io/bundlephobia/minzip/@zakkster/lite-color?style=for-the-badge)](https://bundlephobia.com/result?p=@zakkster/lite-color)
 [![npm downloads](https://img.shields.io/npm/dm/@zakkster/lite-color?style=for-the-badge&color=blue)](https://www.npmjs.com/package/@zakkster/lite-color)
 [![npm total downloads](https://img.shields.io/npm/dt/@zakkster/lite-color?style=for-the-badge&color=blue)](https://www.npmjs.com/package/@zakkster/lite-color)
+![Tree-Shakeable](https://img.shields.io/badge/tree--shakeable-yes-brightgreen)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Types-informational)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-OKLCH color interpolation, multi-stop gradients, and CSS formatting for games and animations.
+OKLCH color interpolation, multi-stop gradients, LUT baking, and CSS formatting for games and animations.
 
 **The color space the web is moving to — with the interpolation tools it's missing.**
 
@@ -23,7 +25,22 @@ HSL interpolation produces muddy grays between saturated colors. RGB is worse. O
 - **Round-trip CSS** — `toCssOklch()` and `parseOklch()` for seamless DOM integration
 - **Works with any RNG** — `randomFromGradient()` accepts anything with `.next()`
 
+- **Pre-baked LUTs** — `bakeGradient()` / `bakeCssGradient()` evaluate the gradient once at setup, index it per frame
+- **RGB bridges** — `toRgbTo()` / `toRgbBytesTo()` write straight into WebGL buffers and canvas `ImageData`, zero allocations
+
 Peer dependency: `@zakkster/lite-lerp`
+
+## Ecosystem Positioning
+
+`@zakkster/lite-color` stays the **<1KB hot-path interpolation core** — tree-shakeable, so a real import costs 416–924 B gzipped ([sizes](#bundle-size-minified--gzipped)).
+
+| Package | Owns |
+|---------|------|
+| **`@zakkster/lite-color`** | OKLCH lerp, multi-stop gradients, CSS round-tripping, `*To` zero-GC variants, LUT baking, RGB bridges |
+| **`@zakkster/lite-hueforge`** | Palette science, harmony generation, color theory primitives, gamut classification, dithering |
+| **`@zakkster/lite-color-engine`** | Design systems, tokens, variants, theme engines, high-level color architecture |
+
+The split is explicit so the three packages never cannibalize each other's pitch. Reach for `lite-color` for fast per-frame color math, `lite-hueforge` for palette generation, `lite-color-engine` to build a production design system.
 
 ## Installation
 
@@ -58,13 +75,28 @@ ctx.fillStyle = toCssOklch(heatmap(temperature));
 | `multiStopGradient()`  | ~90M    |
 | `toCssOklch()`         | ~80M    |
 
+### Bundle Size (minified + gzipped)
+
+`sideEffects: false` — you only pay for what you import.
+
+| Import | Size |
+|--------|------|
+| `lerpOklchTo`, `multiStopGradientTo`, `toCssOklch` (typical hot path) | **416 B** |
+| Full interpolation core (everything from v1.0.x) | **656 B** |
+| `toRgbBytesTo` (canvas ImageData) | **473 B** |
+| `bakeCssGradient` (the confetti pattern) | **566 B** |
+| `bakeGradient` + `toRgbTo` (particle setup) | **924 B** |
+| Entire package surface | 1.37 KB |
+
+The `<1KB` promise is a **per-import** promise, and v1.1.0 keeps it: every realistic import path is still under a kilobyte. The bundlephobia badge reports the full surface, which nobody imports.
+
 ### Comparison
 | Feature | lite‑color | HSL | RGB | chroma.js | d3-color |
 |---------|------------|-----|-----|-----------|----------|
 | Perceptual uniformity | ✔ | ✘ | ✘ | ✔ | ✔ |
 | Shortest‑path hue | ✔ | ✘ | ✘ | ✔ | ✔ |
 | Zero dependencies | ✔ | ✔ | ✔ | ✘ | ✘ |
-| <1KB | ✔ | ✔ | ✔ | ✘ | ✘ |
+| <1KB tree‑shaken | ✔ | ✔ | ✔ | ✘ | ✘ |
 | Hot‑path friendly | ✔ | ✘ | ✘ | ✘ | ✘ |
 | Multi‑stop gradients | ✔ | ✘ | ✘ | ✔ | ✔ |
 
@@ -82,8 +114,62 @@ ctx.fillStyle = toCssOklch(heatmap(temperature));
 | `createGradient(colors, ease?)` | Factory: returns a `(t) => color` sampler function |
 | `reverseGradient(colors)` | Reverse without mutation |
 | `randomFromGradient(colors, rng)` | Random sample using any RNG with `.next()` |
+| `bakeGradient(colors, steps, out?, ease?)` | Bake a gradient into a packed `Float32Array` LUT (3 floats/stop: l, c, h) |
+| `bakeCssGradient(colors, steps, ease?)` | Bake a gradient into pre-formatted CSS `oklch()` strings |
+| `toRgbTo(color, out, offset?)` | Zero-GC OKLCH → normalized sRGB RGBA (0–1) |
+| `toRgbBytesTo(color, out, offset?)` | Zero-GC OKLCH → sRGB bytes (0–255), ImageData-ready |
 
 ## Recipes
+
+### Pre-Baked LUTs & Zero-GC RGB Output (v1.1.0)
+
+Evaluate once at setup. Sample millions of times per second with zero allocations.
+
+```javascript
+import { bakeGradient, bakeCssGradient, toRgbTo, toRgbBytesTo } from '@zakkster/lite-color';
+
+const LUT_STEPS = 128;              // power of two — lets us index with a bitmask
+const LUT_MASK  = LUT_STEPS - 1;
+
+// 1. Numeric OKLCH LUT — 384 floats, one allocation, at setup
+const $lut = bakeGradient([dark, mid, bright], LUT_STEPS);
+
+// Per frame: pure indexing, no lerp, no allocations
+const i = ((t * LUT_MASK) | 0 & LUT_MASK) * 3;
+$color.l = $lut[i];
+$color.c = $lut[i + 1];
+$color.h = $lut[i + 2];
+
+// 2. Straight into a WebGL / lite-gl RGBA field, or canvas ImageData
+toRgbTo($color, $instanceRgba, particleIndex * 4);              // 0–1 floats
+toRgbBytesTo($color, $imageData.data, pixelIndex * 4);          // 0–255 bytes
+
+// 3. Pre-formatted CSS strings — the lite-confetti pattern, now first-class
+const $css = bakeCssGradient([cold, warm, hot], 64);
+// render loop:
+ctx.fillStyle = $css[(t * 63) | 0];   // never toCssOklch() per frame
+```
+
+`bake*` accepts the same optional `ease` as `multiStopGradient`, so a baked LUT matches its live sampler exactly:
+
+```javascript
+import { easeInOut } from '@zakkster/lite-lerp';
+
+const sampler = createGradient([cold, hot], easeInOut);
+const baked   = bakeGradient([cold, hot], 256, undefined, easeInOut);  // same curve
+```
+
+Pass a reusable `out` buffer to re-bake (e.g. on a theme change) with zero allocations:
+
+```javascript
+const $lut = new Float32Array(LUT_STEPS * 3);
+bakeGradient(nextTheme, LUT_STEPS, $lut);   // no allocation, ever
+```
+
+**Notes**
+- `bake*` is setup-time by design. Never call it per frame.
+- Alpha is not interpolated by the gradient functions, so baked stops carry no alpha; `toRgb*` reads `color.a ?? 1`. Bake a parallel alpha ramp if you need one.
+- Out-of-gamut OKLCH is clipped to the sRGB cube by `toRgb*` — the safe, expected behavior for canvas and WebGL. For gamut-aware mapping, use `@zakkster/lite-hueforge`.
 
 ### Multi-Stop Heatmap
 

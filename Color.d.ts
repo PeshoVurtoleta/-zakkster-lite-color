@@ -23,3 +23,12 @@ export declare const createGradient: (colors: OklchColor[], ease?: (t: number) =
 export declare const reverseGradient: (colors: OklchColor[]) => OklchColor[];
 /** Picks a random color from a gradient using an RNG with .next(). */
 export declare const randomFromGradient: (colors: OklchColor[], rng: { next(): number }) => OklchColor;
+
+/** Zero-GC OKLCH → normalized sRGB RGBA (0–1). Writes into `out` at `offset`. */
+export declare const toRgbTo: <T extends Float32Array | Float64Array | number[]>(color: OklchColor, out: T, offset?: number) => T;
+/** Zero-GC OKLCH → sRGB bytes (0–255). Writes into `out` at `offset`. Canvas ImageData ready. */
+export declare const toRgbBytesTo: <T extends Uint8Array | Uint8ClampedArray | number[]>(color: OklchColor, out: T, offset?: number) => T;
+/** Bake a multi-stop gradient into a packed Float32Array LUT (3 floats per stop: l, c, h). */
+export declare const bakeGradient: (colors: OklchColor[], steps: number, out?: Float32Array, ease?: (t: number) => number) => Float32Array;
+/** Bake a multi-stop gradient into an array of pre-formatted CSS oklch() strings. */
+export declare const bakeCssGradient: (colors: OklchColor[], steps: number, ease?: (t: number) => number) => string[];
