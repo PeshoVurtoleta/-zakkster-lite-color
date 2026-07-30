@@ -27,6 +27,7 @@ HSL interpolation produces muddy grays between saturated colors. RGB is worse. O
 
 - **Pre-baked LUTs** — `bakeGradient()` / `bakeCssGradient()` evaluate the gradient once at setup, index it per frame
 - **RGB bridges** — `toRgbTo()` / `toRgbBytesTo()` write straight into WebGL buffers and canvas `ImageData`, zero allocations
+- **sRGB gamut lite** — `isInSrgb()` tells you if a color clips; `clampToSrgb()` pulls it back in by chroma alone, preserving hue and lightness (v2.1.0)
 
 Zero runtime dependencies. (`@zakkster/lite-lerp` is an optional companion for the easing helpers shown below, not a requirement.)
 
@@ -36,11 +37,13 @@ Zero runtime dependencies. (`@zakkster/lite-lerp` is an optional companion for t
 
 | Package | Owns |
 |---------|------|
-| **`@zakkster/lite-color`** | OKLCH lerp, multi-stop gradients, CSS round-tripping, `*To` zero-GC variants, LUT baking, RGB bridges |
-| **`@zakkster/lite-hueforge`** | Palette science, harmony generation, color theory primitives, gamut classification, dithering |
+| **`@zakkster/lite-color`** | OKLCH lerp, multi-stop gradients, CSS round-tripping, `*To` zero-GC variants, LUT baking, RGB bridges, sRGB gamut clamp |
+| **`@zakkster/lite-hueforge`** | Palette science, harmony generation, color theory primitives, tiered gamut classification (sRGB/P3/out), Display-P3, dithering |
 | **`@zakkster/lite-color-engine`** | Design systems, tokens, variants, theme engines, high-level color architecture |
 
 The split is explicit so the three packages never cannibalize each other's pitch. Reach for `lite-color` for fast per-frame color math, `lite-hueforge` for palette generation, `lite-color-engine` to build a production design system.
+
+**Gamut, specifically.** `lite-color` owns the sRGB-only hot-path pair: `isInSrgb()` (does this clip?) and `clampToSrgb()` (fit it, chroma-only). `lite-hueforge` owns the palette-science side: **tiered** classification via `gamutOf()` (`'srgb' | 'p3' | 'out'`), palette-wide `auditGamut()`, Display-P3 end-to-end, and dithering. They share the hue-preserving chroma-bisection *shape* but not code — `lite-color` takes no dependency on `lite-hueforge`.
 
 ## Installation
 
@@ -122,6 +125,8 @@ The `<1KB` promise is a **per-import** promise, and v1.1.0 keeps it: every reali
 | `bakeCssGradient(colors, steps, ease?)` | Bake a gradient into pre-formatted CSS `oklch()` strings |
 | `toRgbTo(color, out, offset?)` | Zero-GC OKLCH → normalized sRGB RGBA (0–1) |
 | `toRgbBytesTo(color, out, offset?)` | Zero-GC OKLCH → sRGB bytes (0–255), ImageData-ready |
+| `isInSrgb(color)` | `true` if the color is displayable in sRGB without clipping (boundary counts as in) |
+| `clampToSrgb(color, out?)` | Fit an out-of-gamut color into sRGB by reducing chroma only; preserves L and h. Zero-GC with `out` |
 
 ## Recipes
 
@@ -174,7 +179,35 @@ bakeGradient(nextTheme, LUT_STEPS, $lut);   // no allocation, ever
 **Notes**
 - `bake*` is setup-time by design. Never call it per frame.
 - **v2.0.0:** the LUT stride is `BAKE_STRIDE` (4 floats/stop: `l, c, h, a`), up from 3. Alpha is now interpolated end to end — a missing `a` on a stop is treated as `1` (opaque). Index by `i * BAKE_STRIDE`, not `i * 3`. `toRgb*` still reads `color.a ?? 1`.
-- Out-of-gamut OKLCH is clipped to the sRGB cube by `toRgb*` — the safe, expected behavior for canvas and WebGL. For gamut-aware mapping, use `@zakkster/lite-hueforge`.
+- Out-of-gamut OKLCH is clipped to the sRGB cube by `toRgb*` — the safe, expected behavior for canvas and WebGL. To *fit* a color into gamut instead of hard-clipping it, use `clampToSrgb()` (below). For tiered classification and Display-P3, use `@zakkster/lite-hueforge`.
+
+### sRGB Gamut Clamping (v2.1.0)
+
+OKLCH lets you name colors that no sRGB display can show. `toRgb*` hard-clips
+those (fast and safe for pixels), but hard-clipping shifts hue and flattens
+detail. `clampToSrgb()` instead pulls the color back along **chroma only**,
+keeping hue and lightness exact — the perceptually honest fix — then hands you a
+color every downstream function already understands:
+
+```javascript
+import { isInSrgb, clampToSrgb, toCssOklch } from '@zakkster/lite-color';
+
+const vivid = { l: 0.7, c: 0.37, h: 145 };   // more chroma than sRGB can show
+
+isInSrgb(vivid);                              // false -- it would clip
+
+// Zero-GC: reuse one object across the whole palette.
+const $safe = { l: 0, c: 0, h: 0, a: 1 };
+clampToSrgb(vivid, $safe);                    // same L and h, chroma reduced to fit
+isInSrgb($safe);                              // true
+element.style.color = toCssOklch($safe);
+```
+
+- Preserves `l` and `h`; moves `c` only. An already-in-gamut color passes through
+  untouched. A missing `a` defaults to `1`; an explicit `a` passes through.
+- Fixed 18-iteration chroma bisection — bounded, predictable cost, boundary
+  resolved to ~`1.5e-6`. No unbounded loops.
+- Zero allocation when you pass `out`. `isInSrgb` never allocates.
 
 ### Multi-Stop Heatmap
 

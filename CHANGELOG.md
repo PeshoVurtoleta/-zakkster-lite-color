@@ -3,6 +3,34 @@
 All notable changes to `@zakkster/lite-color` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-07-30
+
+### Added
+
+- **`isInSrgb(color): boolean`** — is an OKLCH color displayable in sRGB without
+  clipping? Tests the raw linear-light R/G/B against `[0,1]` (the sRGB transfer is
+  monotonic there, so the check is exact and skips the transfer). Alpha is
+  ignored; the boundary counts as in-gamut. Zero allocation.
+- **`clampToSrgb(color, out?): { l, c, h, a }`** — pull an out-of-gamut color into
+  sRGB by reducing **chroma only**, preserving hue and lightness. Fixed 18-iteration
+  chroma bisection (bounded cost; boundary resolved to ~1.5e-6). An in-gamut color
+  is copied through unchanged; alpha passes through; a missing `a` defaults to `1`.
+  Pass `out` for zero-allocation reuse.
+
+### Notes
+
+- Additive and fully backward compatible — no API or LUT-layout change from 2.0.0.
+- **Scope boundary.** This is the sRGB-only, zero-dep hot-path pair. Tiered
+  classification (`srgb`/`p3`/`out`), palette-wide audits, and Display-P3 live in
+  [`@zakkster/lite-hueforge`](https://www.npmjs.com/package/@zakkster/lite-hueforge)
+  (`gamutOf` / `auditGamut`) — same algorithm shape, deliberately not a dependency.
+- Out-of-range lightness (`l` outside `[0,1]`) is clamped into range before
+  clamping chroma: no chroma can rescue an out-of-range `L`, and the function
+  must not return a still-clipping color. See `decisions/0003-gamut-lite.md`.
+- Internally, the OKLCH -> linear-sRGB matrix was factored into a shared
+  `oklchToLinear` helper feeding both the RGB bridges and the gamut checks; the
+  `toRgbTo` / `toRgbBytesTo` output is unchanged.
+
 ## [2.0.0] - 2026-07-30
 
 ### BREAKING

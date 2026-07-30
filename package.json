@@ -1,8 +1,8 @@
 {
   "name": "@zakkster/lite-color",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
-  "version": "2.0.0",
-  "description": "OKLCH color interpolation, multi-stop gradients, LUT baking, RGB bridges, and CSS formatting for games and animations.",
+  "version": "2.1.0",
+  "description": "OKLCH color interpolation, multi-stop gradients, LUT baking, RGB bridges, sRGB gamut clamping, and CSS formatting for games and animations.",
   "type": "module",
   "main": "./Color.js",
   "module": "./Color.js",
@@ -57,6 +57,8 @@
     "baking",
     "webgl",
     "canvas",
+    "gamut",
+    "srgb",
     "zero-gc"
   ],
   "sideEffects": false

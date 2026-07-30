@@ -24,6 +24,8 @@ None. Zero runtime dependencies as of v1.1.1 (lite-lerp primitives vendored). `@
 - `bakeCssGradient(colors, steps, ease?): string[]` — Bake a gradient into pre-formatted CSS `oklch()` strings. Format once at setup, index per frame — never call `toCssOklch()` in a render loop.
 - `toRgbTo(color, out, offset?)` — Zero-GC OKLCH → normalized sRGB RGBA (0–1) written into a caller-owned buffer. Bridge to WebGL / lite-gl RGBA fields.
 - `toRgbBytesTo(color, out, offset?)` — Zero-GC OKLCH → sRGB bytes (0–255) written into a caller-owned buffer. Bridge to canvas ImageData.
+- `isInSrgb(color): boolean` — v2.1.0. True if an OKLCH color is displayable in sRGB without clipping. Tests raw linear-light R/G/B against [0,1] (exact, transfer-free); alpha ignored; boundary counts as in-gamut. Zero allocation.
+- `clampToSrgb(color, out?): OklchColor` — v2.1.0. Fit an out-of-gamut color into sRGB by reducing chroma only, preserving hue and lightness (L is clamped into [0,1] first). Fixed 18-iteration chroma bisection (bounded; boundary resolved to ~1.5e-6). In-gamut colors pass through unchanged; missing alpha defaults to 1. Zero allocation when `out` is provided. sRGB only — for tiered srgb/p3/out classification use `@zakkster/lite-hueforge`.
 
 ## OklchColor Type
 `{ l: number, c: number, h: number, a?: number }` where l=lightness (0–1), c=chroma (0–0.4), h=hue (0–360), a=alpha (0–1).
@@ -45,11 +47,12 @@ const color = heatmap(temperature / maxTemp);
 - User needs multi-stop color gradients for heatmaps, themes, or VFX
 - User wants to interpolate hue via shortest path (no 360° jumps)
 - User needs a pre-baked color LUT for particles, confetti, or high-object-count VFX
+- User needs to detect or fix sRGB gamut clipping cheaply in a render loop (isInSrgb / clampToSrgb); for tiered srgb/p3/out classification or Display-P3, point them to @zakkster/lite-hueforge
 - User needs OKLCH → RGB output for WebGL buffers or canvas ImageData with no per-frame allocations
 
 ## Ecosystem Positioning
 `lite-color` is the <1KB hot-path interpolation core (per-import, tree-shaken; the full surface is 1.37 KB gzipped): OKLCH lerp, multi-stop gradients, CSS round-tripping, `*To` zero-GC variants, LUT baking, and RGB bridges.
-Palette science, harmony generation, and color theory live in `@zakkster/lite-hueforge`.
+Palette science, harmony generation, and color theory live in `@zakkster/lite-hueforge`. Gamut split: `lite-color` owns the sRGB-only hot-path pair (`isInSrgb` / `clampToSrgb`, chroma-only fit); `lite-hueforge` owns tiered classification (`gamutOf` -> srgb/p3/out), palette-wide `auditGamut`, Display-P3, and dithering. Same algorithm shape, no dependency between them.
 Design systems, tokens, variants, and theme engines live in `@zakkster/lite-color-engine`.
 
 ## Part of the @zakkster ecosystem

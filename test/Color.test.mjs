@@ -25,6 +25,8 @@ import {
     toRgbTo,
     toRgbBytesTo,
     BAKE_STRIDE,
+    isInSrgb,
+    clampToSrgb,
 } from '../Color.js';
 
 // vitest toBeCloseTo parity: passes when |actual - expected| < 10**-digits / 2.
@@ -710,6 +712,105 @@ describe('lite-color', () => {
                 assert.equal(css2, css1, `drift at sample ${i}: ${css1} -> ${css2}`);
                 assert.deepEqual(parseOklch(css2), p1);
             }
+        });
+    });
+
+    describe('isInSrgb()', () => {
+        it('accepts a neutral gray (chroma 0) across the lightness range', () => {
+            for (const l of [0, 0.25, 0.5, 0.75, 1]) {
+                assert.equal(isInSrgb({ l, c: 0, h: 0 }), true, `gray l=${l}`);
+            }
+        });
+
+        it('accepts a moderate in-gamut chromatic color', () => {
+            assert.equal(isInSrgb({ l: 0.6, c: 0.1, h: 30 }), true);
+        });
+
+        it('rejects a hyper-saturated out-of-gamut color', () => {
+            assert.equal(isInSrgb({ l: 0.7, c: 0.37, h: 145 }), false);
+        });
+
+        it('treats a color exactly on the boundary (white, linear RGB = 1) as in-gamut', () => {
+            // Tie-break contract: on the boundary counts as IN gamut.
+            assert.equal(isInSrgb({ l: 1, c: 0, h: 0 }), true);
+        });
+
+        it('ignores alpha (gamut is an RGB property)', () => {
+            assert.equal(isInSrgb({ l: 0.6, c: 0.1, h: 30, a: 0 }), true);
+        });
+
+        it('is stable and side-effect free across a hot loop (shared scratch)', () => {
+            const c = { l: 0.55, c: 0.2, h: 200 };
+            const first = isInSrgb(c);
+            for (let i = 0; i < 1000; i++) assert.equal(isInSrgb(c), first);
+        });
+    });
+
+    describe('clampToSrgb()', () => {
+        // isInSrgb is the in-gamut oracle here -- it is the public contract the
+        // clamp must satisfy. The boundary-falsification test below proves the
+        // search converges to the edge rather than stopping short of it.
+
+        it('leaves an already-in-gamut color unchanged', () => {
+            const c = { l: 0.6, c: 0.08, h: 30, a: 0.5 };
+            const out = clampToSrgb(c);
+            closeTo(out.l, c.l, 6);
+            closeTo(out.c, c.c, 6);
+            closeTo(out.h, c.h, 6);
+            assert.equal(out.a, 0.5);
+        });
+
+        it('brings an out-of-gamut color into gamut, preserving L and h', () => {
+            const c = { l: 0.7, c: 0.37, h: 145 };
+            const out = clampToSrgb(c);
+            assert.equal(isInSrgb(out), true);
+            assert.equal(out.l, c.l);        // L preserved exactly (already in [0,1])
+            assert.equal(out.h, c.h);        // h preserved exactly
+            assert.ok(out.c < c.c, 'chroma was reduced');
+        });
+
+        it('lands tight on the boundary (fixed-iteration convergence)', () => {
+            const c = { l: 0.7, c: 0.37, h: 145 };
+            const out = clampToSrgb(c);
+            assert.equal(isInSrgb(out), true);
+            // One coarse step past the found chroma must fall out of gamut: proof
+            // the search reached the boundary, not that it merely reduced chroma.
+            assert.equal(isInSrgb({ l: out.l, c: out.c + 1e-4, h: out.h }), false);
+        });
+
+        it('defaults missing alpha to 1 and passes explicit alpha through', () => {
+            assert.equal(clampToSrgb({ l: 0.7, c: 0.37, h: 145 }).a, 1);
+            assert.equal(clampToSrgb({ l: 0.7, c: 0.37, h: 145, a: 0.3 }).a, 0.3);
+        });
+
+        it('clamps an out-of-range lightness into [0,1] (fail closed)', () => {
+            const out = clampToSrgb({ l: 1.5, c: 0.3, h: 30 });
+            assert.ok(out.l >= 0 && out.l <= 1, `l was ${out.l}`);
+            assert.equal(isInSrgb(out), true);
+        });
+
+        it('produces in-gamut output across a swept L x C x h corpus', () => {
+            for (let li = 1; li <= 9; li++) {
+                for (let ci = 0; ci <= 8; ci++) {
+                    for (let hue = 0; hue < 360; hue += 30) {
+                        const c = { l: li / 10, c: (ci / 8) * 0.4, h: hue };
+                        const out = clampToSrgb(c);
+                        assert.equal(
+                            isInSrgb(out), true,
+                            `still out of gamut: l=${c.l} c=${c.c} h=${c.h} -> c'=${out.c}`
+                        );
+                        closeTo(out.l, c.l, 9);   // L never moves for l in [0,1]
+                        closeTo(out.h, c.h, 9);   // h never moves
+                        assert.ok(out.c <= c.c + 1e-9, `chroma grew: ${c.c} -> ${out.c}`);
+                    }
+                }
+            }
+        });
+
+        it('writes into a caller-owned out and returns it (zero-GC)', () => {
+            const out = { l: 0, c: 0, h: 0, a: 1 };
+            const ret = clampToSrgb({ l: 0.7, c: 0.37, h: 145 }, out);
+            assert.equal(ret, out);
         });
     });
 });

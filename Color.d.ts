@@ -29,9 +29,9 @@ export declare const reverseGradient: (colors: OklchColor[]) => OklchColor[];
 /** Picks a random color from a gradient using an RNG with .next(). */
 export declare const randomFromGradient: (colors: OklchColor[], rng: { next(): number }) => OklchColor;
 
-/** Zero-GC OKLCH → normalized sRGB RGBA (0–1). Writes into `out` at `offset`. */
+/** Zero-GC OKLCH -> normalized sRGB RGBA (0-1). Writes into `out` at `offset`. */
 export declare const toRgbTo: <T extends Float32Array | Float64Array | number[]>(color: OklchColor, out: T, offset?: number) => T;
-/** Zero-GC OKLCH → sRGB bytes (0–255). Writes into `out` at `offset`. Canvas ImageData ready. */
+/** Zero-GC OKLCH -> sRGB bytes (0-255). Writes into `out` at `offset`. Canvas ImageData ready. */
 export declare const toRgbBytesTo: <T extends Uint8Array | Uint8ClampedArray | number[]>(color: OklchColor, out: T, offset?: number) => T;
 /** Floats per stop in a bakeGradient LUT: l, c, h, a. */
 export declare const BAKE_STRIDE: 4;
@@ -39,3 +39,17 @@ export declare const BAKE_STRIDE: 4;
 export declare const bakeGradient: (colors: OklchColor[], steps: number, out?: Float32Array, ease?: (t: number) => number) => Float32Array;
 /** Bake a multi-stop gradient into an array of pre-formatted CSS oklch() strings. */
 export declare const bakeCssGradient: (colors: OklchColor[], steps: number, ease?: (t: number) => number) => string[];
+
+/**
+ * True iff an OKLCH color is displayable in sRGB without clipping. Tests the raw
+ * linear-light R/G/B against [0,1]; alpha is ignored; the boundary is in-gamut.
+ * Zero allocation. For tiered srgb/p3/out classification, see @zakkster/lite-hueforge.
+ */
+export declare const isInSrgb: (color: Pick<OklchColor, 'l' | 'c' | 'h'>) => boolean;
+/**
+ * Pull an out-of-gamut OKLCH color into sRGB by reducing chroma only, preserving
+ * hue and lightness (L is clamped into [0,1] first). Fixed-iteration chroma
+ * bisection; an in-gamut color is copied through unchanged. Alpha passes through.
+ * Pass `out` for zero-allocation reuse.
+ */
+export declare const clampToSrgb: (color: OklchColor, out?: OklchColor) => Required<OklchColor>;
