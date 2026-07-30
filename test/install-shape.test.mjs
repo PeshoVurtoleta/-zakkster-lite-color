@@ -38,7 +38,7 @@ test('Color.js has no bare @zakkster/* (or any non-node) import', () => {
 
 test('the module imports and computes with no dependency installed', async () => {
     // This test file resolves nothing but node:* and a relative path, so it runs
-    // green in a directory whose node_modules is empty — exactly the pnpm /
+    // green in a directory whose node_modules is empty -- exactly the pnpm /
     // Yarn Classic scenario that used to throw ERR_MODULE_NOT_FOUND.
     const mod = await import('../Color.js');
 

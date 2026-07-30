@@ -4,6 +4,10 @@
  * v1.1.0 adds LUT baking (bakeGradient / bakeCssGradient) and zero-GC RGB bridges
  * (toRgbTo / toRgbBytesTo) for WebGL buffers and canvas ImageData.
  *
+ * v2.0.0 threads alpha end to end and completes the CSS Color 4 oklch() grammar.
+ * BREAKING: bakeGradient's packed LUT is now 4 floats per stop (l, c, h, a),
+ * up from 3. See decisions/0002-alpha-and-grammar.md and the CHANGELOG.
+ *
  * Zero runtime dependencies. The three interpolation primitives below are
  * vendored byte-identical from @zakkster/lite-lerp, which remains the source of
  * truth if they ever diverge. See decisions/0001-inline-lerp-primitives.md for
@@ -21,33 +25,37 @@ const lerpAngle = (a, b, t) => a + wrap(b - a, -180, 180) * t;
 /**
  * Linearly interpolates between two OKLCH colors.
  * Safely clamps Lightness (0–1) and prevents negative Chroma.
+ * Alpha is interpolated linearly and clamped to [0,1]; a missing `a` on either
+ * input is treated as 1 (fully opaque) per CSS Color 4.
  * NOTE: Allocates a new object. For hot-path use, prefer lerpOklchTo().
  *
- * @param {{ l: number, c: number, h: number }} a - Start color
- * @param {{ l: number, c: number, h: number }} b - End color
+ * @param {{ l: number, c: number, h: number, a?: number }} a - Start color
+ * @param {{ l: number, c: number, h: number, a?: number }} b - End color
  * @param {number} t - Interpolation factor (0–1)
- * @returns {{ l: number, c: number, h: number }} New object
+ * @returns {{ l: number, c: number, h: number, a: number }} New object
  */
 export const lerpOklch = (a, b, t) => ({
     l: clamp(lerp(a.l, b.l, t), 0, 1),
     c: Math.max(0, lerp(a.c, b.c, t)),
     h: lerpAngle(a.h, b.h, t),
+    a: clamp(lerp(a.a ?? 1, b.a ?? 1, t), 0, 1),
 });
 
 /**
  * Zero-GC variant of lerpOklch. Writes directly into a caller-owned output object.
  * Use this in render loops, LUT generation, or any per-frame hot path.
  *
- * @param {{ l: number, c: number, h: number }} a - Start color
- * @param {{ l: number, c: number, h: number }} b - End color
+ * @param {{ l: number, c: number, h: number, a?: number }} a - Start color
+ * @param {{ l: number, c: number, h: number, a?: number }} b - End color
  * @param {number} t - Interpolation factor (0–1)
- * @param {{ l: number, c: number, h: number }} out - Pre-allocated output
- * @returns {{ l: number, c: number, h: number }} Same `out` reference
+ * @param {{ l: number, c: number, h: number, a?: number }} out - Pre-allocated output
+ * @returns {{ l: number, c: number, h: number, a: number }} Same `out` reference
  */
 export const lerpOklchTo = (a, b, t, out) => {
     out.l = clamp(lerp(a.l, b.l, t), 0, 1);
     out.c = Math.max(0, lerp(a.c, b.c, t));
     out.h = lerpAngle(a.h, b.h, t);
+    out.a = clamp(lerp(a.a ?? 1, b.a ?? 1, t), 0, 1);
     return out;
 };
 
@@ -60,23 +68,65 @@ export const lerpOklchTo = (a, b, t, out) => {
 export const toCssOklch = ({ l, c, h, a = 1 }) =>
     `oklch(${l.toFixed(4)} ${c.toFixed(4)} ${h.toFixed(2)} / ${a})`;
 
+// CSS Color 4 oklch() grammar. Reference ranges, per spec:
+//   L: <number> | <0-100%>  -> 0-1
+//   C: <number> | <0-100%>  -> 0-0.4   (NOTE: 100% chroma is 0.4, NOT 1)
+//   H: <angle> (deg | rad | grad | turn) | unitless <number>, in degrees
+//   A: <number> | <0-100%>  -> 0-1;  omitted -> 1;  explicit `none` -> 0
+// `none` on any channel parses to 0. This is a deliberate simplification: the
+// full CSS "powerless component" carry-forward during interpolation is out of
+// scope for a game/render library. Malformed input throws (fail at config time,
+// not while rendering an invisible gradient every frame).
+const NUM = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?';
+const OKLCH_RE = new RegExp(
+    '^\\s*oklch\\(\\s*' +
+    '(none|' + NUM + '%?)\\s+' +                     // L
+    '(none|' + NUM + '%?)\\s+' +                     // C
+    '(none|' + NUM + '(?:deg|rad|grad|turn)?)' +     // H (angle or unitless)
+    '(?:\\s*/\\s*(none|' + NUM + '%?))?' +           // optional / A
+    '\\s*\\)\\s*$',
+    'i'
+);
+
+/** Parse an L/C/A channel token. `pctScale` maps 100% -> its channel maximum. */
+const parseChannel = (tok, pctScale) =>
+    tok.toLowerCase() === 'none'
+        ? 0
+        : tok.endsWith('%')
+            ? (parseFloat(tok) / 100) * pctScale
+            : parseFloat(tok);
+
+/** Parse a hue token to degrees, honouring deg/rad/grad/turn (grad before rad). */
+const parseHue = (tok) => {
+    const t = tok.toLowerCase();
+    if (t === 'none') return 0;
+    const v = parseFloat(t);
+    if (t.endsWith('turn')) return v * 360;
+    if (t.endsWith('grad')) return v * 0.9;
+    if (t.endsWith('rad')) return v * (180 / Math.PI);
+    return v; // deg or unitless
+};
+
 /**
- * Parse an OKLCH CSS string back to an object.
- * Handles: oklch(0.7 0.15 120), oklch(0.7 0.15 120 / 0.5)
+ * Parse a CSS Color 4 oklch() string back to an object. Full grammar:
+ * numbers, percentages (L/C/A), `none` channels, deg/rad/grad/turn hue, the
+ * `/ alpha` slash form (number or percentage), leading-dot numbers, and
+ * flexible whitespace. Omitted alpha defaults to 1; explicit `none` alpha is 0.
+ *
+ * Throws on malformed input rather than returning null -- a typo fails when the
+ * color is defined, not silently every frame it is rendered.
  *
  * @param {string} str - CSS oklch() string
  * @returns {{ l: number, c: number, h: number, a: number }}
  */
 export const parseOklch = (str) => {
-    const match = str.match(
-        /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\s*\)/
-    );
-    if (!match) throw new Error(`lite-color: cannot parse "${str}"`);
+    const m = OKLCH_RE.exec(str);
+    if (!m) throw new Error(`lite-color: cannot parse "${str}"`);
     return {
-        l: parseFloat(match[1]),
-        c: parseFloat(match[2]),
-        h: parseFloat(match[3]),
-        a: match[4] !== undefined ? parseFloat(match[4]) : 1,
+        l: parseChannel(m[1], 1),
+        c: parseChannel(m[2], 0.4),
+        h: parseHue(m[3]),
+        a: m[4] === undefined ? 1 : parseChannel(m[4], 1),
     };
 };
 
@@ -118,6 +168,7 @@ export const multiStopGradientTo = (colors, t, out, ease = (x) => x) => {
     }
     if (colors.length === 1) {
         out.l = colors[0].l; out.c = colors[0].c; out.h = colors[0].h;
+        out.a = colors[0].a ?? 1;
         return out;
     }
 
@@ -128,6 +179,7 @@ export const multiStopGradientTo = (colors, t, out, ease = (x) => x) => {
     if (index >= colors.length - 1) {
         const last = colors[colors.length - 1];
         out.l = last.l; out.c = last.c; out.h = last.h;
+        out.a = last.a ?? 1;
         return out;
     }
 
@@ -239,22 +291,28 @@ const bakeSteps = (colors, steps) => {
     return steps | 0;
 };
 
+/** Floats per stop in a bakeGradient LUT: l, c, h, a. */
+export const BAKE_STRIDE = 4;
+
 /**
  * Bake a multi-stop gradient into a packed Float32Array LUT of pre-evaluated OKLCH stops.
- * Each stop is 3 consecutive floats: [l0, c0, h0, l1, c1, h1, ...].
+ * Each stop is 4 consecutive floats: [l0, c0, h0, a0, l1, c1, h1, a1, ...].
+ *
+ * BREAKING in v2.0.0: the stride grew from 3 to 4 floats per stop to carry alpha
+ * (see BAKE_STRIDE). Index a stop's channels as base = i * BAKE_STRIDE.
  *
  * Setup-time by design. Sample it per frame with an index — no lerp, no allocations.
- * Pass a reusable `out` (length >= steps * 3) to re-bake with zero allocations.
+ * Pass a reusable `out` (length >= steps * BAKE_STRIDE) to re-bake with zero allocations.
  *
  * @param {Array} colors - Array of OKLCH color objects
  * @param {number} steps - LUT resolution (truncated to an integer)
  * @param {Float32Array} [out] - Optional caller-owned buffer
  * @param {Function} [ease] - Optional easing function, applied as in multiStopGradient
- * @returns {Float32Array} `out` if provided, else a new Float32Array(steps * 3)
+ * @returns {Float32Array} `out` if provided, else a new Float32Array(steps * BAKE_STRIDE)
  */
 export const bakeGradient = (colors, steps, out, ease = (x) => x) => {
     const n = bakeSteps(colors, steps);
-    const len = n * 3;
+    const len = n * BAKE_STRIDE;
 
     if (out === undefined || out === null) {
         out = new Float32Array(len);
@@ -262,14 +320,15 @@ export const bakeGradient = (colors, steps, out, ease = (x) => x) => {
         throw new Error(`lite-color: out must have length >= ${len}, got ${out.length}`);
     }
 
-    const temp = { l: 0, c: 0, h: 0 };
+    const temp = { l: 0, c: 0, h: 0, a: 1 };
     const denom = n > 1 ? n - 1 : 1;
     for (let i = 0; i < n; i++) {
         multiStopGradientTo(colors, i / denom, temp, ease);
-        const idx = i * 3;
+        const idx = i * BAKE_STRIDE;
         out[idx] = temp.l;
         out[idx + 1] = temp.c;
         out[idx + 2] = temp.h;
+        out[idx + 3] = temp.a;
     }
     return out;
 };
@@ -288,7 +347,7 @@ export const bakeCssGradient = (colors, steps, ease = (x) => x) => {
     const n = bakeSteps(colors, steps);
     const result = new Array(n);
 
-    const temp = { l: 0, c: 0, h: 0 };
+    const temp = { l: 0, c: 0, h: 0, a: 1 };
     const denom = n > 1 ? n - 1 : 1;
     for (let i = 0; i < n; i++) {
         multiStopGradientTo(colors, i / denom, temp, ease);

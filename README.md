@@ -118,7 +118,7 @@ The `<1KB` promise is a **per-import** promise, and v1.1.0 keeps it: every reali
 | `createGradient(colors, ease?)` | Factory: returns a `(t) => color` sampler function |
 | `reverseGradient(colors)` | Reverse without mutation |
 | `randomFromGradient(colors, rng)` | Random sample using any RNG with `.next()` |
-| `bakeGradient(colors, steps, out?, ease?)` | Bake a gradient into a packed `Float32Array` LUT (3 floats/stop: l, c, h) |
+| `bakeGradient(colors, steps, out?, ease?)` | Bake a gradient into a packed `Float32Array` LUT (`BAKE_STRIDE` = 4 floats/stop: l, c, h, a) |
 | `bakeCssGradient(colors, steps, ease?)` | Bake a gradient into pre-formatted CSS `oklch()` strings |
 | `toRgbTo(color, out, offset?)` | Zero-GC OKLCH → normalized sRGB RGBA (0–1) |
 | `toRgbBytesTo(color, out, offset?)` | Zero-GC OKLCH → sRGB bytes (0–255), ImageData-ready |
@@ -130,19 +130,20 @@ The `<1KB` promise is a **per-import** promise, and v1.1.0 keeps it: every reali
 Evaluate once at setup. Sample millions of times per second with zero allocations.
 
 ```javascript
-import { bakeGradient, bakeCssGradient, toRgbTo, toRgbBytesTo } from '@zakkster/lite-color';
+import { bakeGradient, bakeCssGradient, toRgbTo, toRgbBytesTo, BAKE_STRIDE } from '@zakkster/lite-color';
 
 const LUT_STEPS = 128;              // power of two — lets us index with a bitmask
 const LUT_MASK  = LUT_STEPS - 1;
 
-// 1. Numeric OKLCH LUT — 384 floats, one allocation, at setup
+// 1. Numeric OKLCH LUT — LUT_STEPS * BAKE_STRIDE (512) floats, one allocation, at setup
 const $lut = bakeGradient([dark, mid, bright], LUT_STEPS);
 
-// Per frame: pure indexing, no lerp, no allocations
-const i = ((t * LUT_MASK) | 0 & LUT_MASK) * 3;
+// Per frame: pure indexing, no lerp, no allocations. Stride is 4: l, c, h, a.
+const i = (((t * LUT_MASK) | 0) & LUT_MASK) * BAKE_STRIDE;
 $color.l = $lut[i];
 $color.c = $lut[i + 1];
 $color.h = $lut[i + 2];
+$color.a = $lut[i + 3];            // v2.0.0: alpha is baked in
 
 // 2. Straight into a WebGL / lite-gl RGBA field, or canvas ImageData
 toRgbTo($color, $instanceRgba, particleIndex * 4);              // 0–1 floats
@@ -166,13 +167,13 @@ const baked   = bakeGradient([cold, hot], 256, undefined, easeInOut);  // same c
 Pass a reusable `out` buffer to re-bake (e.g. on a theme change) with zero allocations:
 
 ```javascript
-const $lut = new Float32Array(LUT_STEPS * 3);
+const $lut = new Float32Array(LUT_STEPS * BAKE_STRIDE);
 bakeGradient(nextTheme, LUT_STEPS, $lut);   // no allocation, ever
 ```
 
 **Notes**
 - `bake*` is setup-time by design. Never call it per frame.
-- Alpha is not interpolated by the gradient functions, so baked stops carry no alpha; `toRgb*` reads `color.a ?? 1`. Bake a parallel alpha ramp if you need one.
+- **v2.0.0:** the LUT stride is `BAKE_STRIDE` (4 floats/stop: `l, c, h, a`), up from 3. Alpha is now interpolated end to end — a missing `a` on a stop is treated as `1` (opaque). Index by `i * BAKE_STRIDE`, not `i * 3`. `toRgb*` still reads `color.a ?? 1`.
 - Out-of-gamut OKLCH is clipped to the sRGB cube by `toRgb*` — the safe, expected behavior for canvas and WebGL. For gamut-aware mapping, use `@zakkster/lite-hueforge`.
 
 ### Multi-Stop Heatmap

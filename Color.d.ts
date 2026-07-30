@@ -11,8 +11,13 @@ export declare const lerpOklch: (a: OklchColor, b: OklchColor, t: number) => Okl
 export declare const lerpOklchTo: (a: OklchColor, b: OklchColor, t: number, out: OklchColor) => OklchColor;
 /** Formats an OKLCH object to a CSS string. */
 export declare const toCssOklch: (color: OklchColor) => string;
-/** Parse an OKLCH CSS string back to an object. */
-export declare const parseOklch: (str: string) => OklchColor;
+/**
+ * Parse a CSS Color 4 oklch() string. Supports numbers, percentages (L/C/A),
+ * `none` channels, deg/rad/grad/turn hue, the `/ alpha` slash form, leading-dot
+ * numbers and flexible whitespace. Omitted alpha -> 1; explicit `none` -> 0.
+ * Throws on malformed input. Returned `a` is always defined.
+ */
+export declare const parseOklch: (str: string) => Required<OklchColor>;
 /** Multi-stop gradient evaluation with optional easing. */
 export declare const multiStopGradient: (colors: OklchColor[], t: number, ease?: (t: number) => number) => OklchColor;
 /** Multi-stop gradient evaluation with optional easing, Zero-GC */
@@ -28,7 +33,9 @@ export declare const randomFromGradient: (colors: OklchColor[], rng: { next(): n
 export declare const toRgbTo: <T extends Float32Array | Float64Array | number[]>(color: OklchColor, out: T, offset?: number) => T;
 /** Zero-GC OKLCH → sRGB bytes (0–255). Writes into `out` at `offset`. Canvas ImageData ready. */
 export declare const toRgbBytesTo: <T extends Uint8Array | Uint8ClampedArray | number[]>(color: OklchColor, out: T, offset?: number) => T;
-/** Bake a multi-stop gradient into a packed Float32Array LUT (3 floats per stop: l, c, h). */
+/** Floats per stop in a bakeGradient LUT: l, c, h, a. */
+export declare const BAKE_STRIDE: 4;
+/** Bake a multi-stop gradient into a packed Float32Array LUT (BAKE_STRIDE floats per stop: l, c, h, a). */
 export declare const bakeGradient: (colors: OklchColor[], steps: number, out?: Float32Array, ease?: (t: number) => number) => Float32Array;
 /** Bake a multi-stop gradient into an array of pre-formatted CSS oklch() strings. */
 export declare const bakeCssGradient: (colors: OklchColor[], steps: number, ease?: (t: number) => number) => string[];

@@ -3,6 +3,54 @@
 All notable changes to `@zakkster/lite-color` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-07-30
+
+### BREAKING
+
+- **`bakeGradient` LUT stride is now 4 floats per stop (`l, c, h, a`), up from 3.**
+  The packed `Float32Array` grew to carry alpha. Index a stop by
+  `base = i * BAKE_STRIDE` (`BAKE_STRIDE === 4`), read `a` at `base + 3`, and
+  size any caller-owned `out` as `steps * BAKE_STRIDE`.
+
+  | Before (v1.x, stride 3) | After (v2.0, stride 4) |
+  | --- | --- |
+  | `const l = lut[i * 3]` | `const l = lut[i * BAKE_STRIDE]` |
+  | `const c = lut[i * 3 + 1]` | `const c = lut[i * BAKE_STRIDE + 1]` |
+  | `const h = lut[i * 3 + 2]` | `const h = lut[i * BAKE_STRIDE + 2]` |
+  | *(no alpha)* | `const a = lut[i * BAKE_STRIDE + 3]` |
+  | `new Float32Array(steps * 3)` | `new Float32Array(steps * BAKE_STRIDE)` |
+
+  `bakeCssGradient` is **not** affected — it returns strings, and now simply
+  includes the interpolated alpha in each `oklch(... / a)`.
+
+### Added
+
+- **Alpha threaded end to end.** `lerpOklch`, `lerpOklchTo`,
+  `multiStopGradientTo`, `bakeGradient` and `bakeCssGradient` now carry `a`.
+  A missing `a` on either input defaults to `1` (opaque) per CSS Color 4; alpha
+  interpolates linearly and is clamped to `[0,1]`.
+- **`BAKE_STRIDE`** constant (`4`) — index LUTs by this, not a literal.
+- **Full CSS Color 4 `oklch()` grammar** in `parseOklch`: number and percentage
+  channels (L%/A% -> 0-1, **C% -> 0-0.4**), `none` channels, `deg`/`rad`/`grad`/
+  `turn` hue units, the `/ alpha` slash form (number or percentage), leading-dot
+  numbers, case-insensitivity, and flexible whitespace.
+
+### Changed
+
+- `parseOklch` now **throws** on malformed input with a `cannot parse` message
+  (it already did on the previous narrow grammar; the guarantee is now documented
+  and tested). Rationale: fail at config time, not while rendering.
+- `parseOklch` return type is `Required<OklchColor>` — `a` is always defined.
+
+### Notes
+
+- Omitted alpha parses to `1`; an explicit `/ none` parses to `0`. `none` on any
+  channel parses to `0` (the full CSS "powerless component" interpolation is a
+  documented non-goal).
+- Recorded tradeoff: threading alpha adds ~2 ops to `lerpOklch`'s hot body, so
+  its throughput is intentionally not identical to v1.x.
+- Rationale and rejected alternatives in `decisions/0002-alpha-and-grammar.md`.
+
 ## [1.1.1] - 2026-07-30
 
 ### Fixed
@@ -49,6 +97,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - `multiStopGradient` / `multiStopGradientTo`, `createGradient`,
   `reverseGradient`, `randomFromGradient`.
 
+[2.0.0]: https://github.com/PeshoVurtoleta/lite-color/releases/tag/v2.0.0
 [1.1.1]: https://github.com/PeshoVurtoleta/lite-color/releases/tag/v1.1.1
 [1.1.0]: https://github.com/PeshoVurtoleta/lite-color/releases/tag/v1.1.0
 [1.0.0]: https://github.com/PeshoVurtoleta/lite-color/releases/tag/v1.0.0

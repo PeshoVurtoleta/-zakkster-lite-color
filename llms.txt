@@ -10,16 +10,17 @@ None. Zero runtime dependencies as of v1.1.1 (lite-lerp primitives vendored). `@
 
 ## Exports
 
-- `lerpOklch(a, b, t): OklchColor` — Interpolate between two OKLCH colors. Clamps lightness 0–1, prevents negative chroma, shortest-path hue interpolation.
+- `lerpOklch(a, b, t): OklchColor` — Interpolate between two OKLCH colors. Clamps lightness 0–1, prevents negative chroma, shortest-path hue interpolation. v2.0.0: alpha is interpolated linearly and clamped to 0–1; a missing `a` on either input is treated as 1 (opaque).
 - `lerpOklchTo(a, b, t, out): OklchColor` - Zero-GC variant of lerpOklch. Writes directly into a caller-owned output object.
 - `toCssOklch({ l, c, h, a? }): string` — Format OKLCH object to CSS string: `oklch(0.7000 0.1500 120.00 / 1)`.
-- `parseOklch(str): OklchColor` — Parse CSS `oklch()` string back to `{ l, c, h, a }` object.
+- `parseOklch(str): OklchColor` — Parse a CSS Color 4 `oklch()` string to `{ l, c, h, a }`. Full grammar: numbers, percentages (L%/A% map 0-100 to 0-1, C% maps 0-100 to 0-0.4), `none` channels (parsed as 0), `deg`/`rad`/`grad`/`turn` hue units, the `/ alpha` slash form (number or percentage), leading-dot numbers, flexible whitespace, case-insensitive. Omitted alpha is 1; explicit `/ none` is 0. Throws on malformed input.
 - `multiStopGradient(colors, t, ease?): OklchColor` — Evaluate a multi-stop OKLCH gradient at position t (0–1). Optional easing function.
 - `multiStopGradientTo(colors, t, out, ease?)` - Same as multiStopGradient, Zero-GC.
 - `createGradient(colors, ease?): (t) => OklchColor` — Create a reusable gradient sampler function. Call the returned function with t (0–1).
 - `reverseGradient(colors): OklchColor[]` — Reverse a color array without mutating the original.
 - `randomFromGradient(colors, rng): OklchColor` — Pick a random color from anywhere along the gradient using a seeded RNG.
-- `bakeGradient(colors, steps, out?, ease?): Float32Array` — Bake a gradient into a packed LUT of pre-evaluated OKLCH stops (3 floats per stop: l, c, h). Setup-time. Pass `out` to re-bake with zero allocations.
+- `BAKE_STRIDE: 4` — Floats per stop in a bakeGradient LUT (l, c, h, a). Index a stop as `i * BAKE_STRIDE`.
+- `bakeGradient(colors, steps, out?, ease?): Float32Array` — Bake a gradient into a packed LUT of pre-evaluated OKLCH stops. v2.0.0: `BAKE_STRIDE` = 4 floats per stop (l, c, h, a), up from 3. Setup-time. Pass `out` (length >= steps * BAKE_STRIDE) to re-bake with zero allocations.
 - `bakeCssGradient(colors, steps, ease?): string[]` — Bake a gradient into pre-formatted CSS `oklch()` strings. Format once at setup, index per frame — never call `toCssOklch()` in a render loop.
 - `toRgbTo(color, out, offset?)` — Zero-GC OKLCH → normalized sRGB RGBA (0–1) written into a caller-owned buffer. Bridge to WebGL / lite-gl RGBA fields.
 - `toRgbBytesTo(color, out, offset?)` — Zero-GC OKLCH → sRGB bytes (0–255) written into a caller-owned buffer. Bridge to canvas ImageData.
