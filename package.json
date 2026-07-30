@@ -23,8 +23,14 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node --test 'test/**/*.mjs'",
-    "test:watch": "node --test --watch 'test/**/*.mjs'"
+    "test": "node --test 'test/**/*.test.mjs'",
+    "test:watch": "node --test --watch 'test/**/*.test.mjs'",
+    "torture": "node --expose-gc test/torture.mjs",
+    "verify": "npm test && npm run torture"
+  },
+  "devDependencies": {
+    "@zakkster/lite-gc-profiler": "^1.11.0",
+    "@zakkster/lite-leak": "^1.8.0"
   },
   "license": "MIT",
   "homepage": "https://github.com/PeshoVurtoleta/lite-color#readme",
