@@ -6,7 +6,7 @@
 npm install @zakkster/lite-color
 
 ## Dependencies
-@zakkster/lite-lerp
+None. Zero runtime dependencies as of v1.1.1 (lite-lerp primitives vendored). `@zakkster/lite-lerp` is an optional companion for easing helpers only.
 
 ## Exports
 

@@ -4,10 +4,19 @@
  * v1.1.0 adds LUT baking (bakeGradient / bakeCssGradient) and zero-GC RGB bridges
  * (toRgbTo / toRgbBytesTo) for WebGL buffers and canvas ImageData.
  *
- * Depends on @zakkster/lite-lerp for interpolation primitives.
+ * Zero runtime dependencies. The three interpolation primitives below are
+ * vendored byte-identical from @zakkster/lite-lerp, which remains the source of
+ * truth if they ever diverge. See decisions/0001-inline-lerp-primitives.md for
+ * why the former peer import was inlined (v1.1.1).
  */
 
-import { lerp, lerpAngle, clamp } from '@zakkster/lite-lerp';
+const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+const lerp = (a, b, t) => (t === 1 ? b : a + t * (b - a));
+const wrap = (v, min, max) => {
+    const range = max - min;
+    return !(range > 0) ? min : min + (((v - min) % range) + range) % range;
+};
+const lerpAngle = (a, b, t) => a + wrap(b - a, -180, 180) * t;
 
 /**
  * Linearly interpolates between two OKLCH colors.

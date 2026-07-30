@@ -28,7 +28,7 @@ HSL interpolation produces muddy grays between saturated colors. RGB is worse. O
 - **Pre-baked LUTs** — `bakeGradient()` / `bakeCssGradient()` evaluate the gradient once at setup, index it per frame
 - **RGB bridges** — `toRgbTo()` / `toRgbBytesTo()` write straight into WebGL buffers and canvas `ImageData`, zero allocations
 
-Peer dependency: `@zakkster/lite-lerp`
+Zero runtime dependencies. (`@zakkster/lite-lerp` is an optional companion for the easing helpers shown below, not a requirement.)
 
 ## Ecosystem Positioning
 
@@ -45,8 +45,12 @@ The split is explicit so the three packages never cannibalize each other's pitch
 ## Installation
 
 ```bash
-npm install @zakkster/lite-color @zakkster/lite-lerp
+npm install @zakkster/lite-color
 ```
+
+The core has no runtime dependencies. The easing functions used in some examples
+below (`easeInOut`, `easeIn`, `easeOut`) live in `@zakkster/lite-lerp` — install
+it too if you want them: `npm install @zakkster/lite-lerp`.
 
 ## Quick Start
 
